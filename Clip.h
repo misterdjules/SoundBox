@@ -24,6 +24,9 @@ public:
     WarpMarker() : m_SampleTime(0.0), m_BeatTime(0.0) {}
     WarpMarker(double sampleTime, double beatTime) : m_SampleTime(sampleTime), m_BeatTime(beatTime) {}
 
+	bool operator==(const WarpMarker& rhs) const;
+	bool operator!=(const WarpMarker& rhs) const { return !operator==(rhs); }
+
     double GetBeatTime() const { return m_BeatTime; }
     double GetSampleTime() const { return m_SampleTime; }
 	
@@ -40,27 +43,40 @@ private:
 class AClip
 {
 private:
-    PeakDetector*           m_PeakDetector;
-    std::vector<WarpMarker> m_WarpMarkers;
-    short                   m_BPMCached;
-    AudioInfo               m_AudioInfo;
-    std::vector<Peak>       m_Peaks;
-    std::vector<double>     m_Samples;
+    AudioInfo               m_AudioInfo;   	
+    
+	std::vector<double>     m_Samples;
 
+	std::vector<WarpMarker> m_WarpMarkers;	
+	WarpMarker				m_CurrentCachedLowBoundWarpMarker;
+	WarpMarker				m_CurrentCachedHighBoundWarpMarker;
+	bool					m_LowAndHighBoundWarpMarkersCacheIsValid;
+
+	PeakDetector*           m_PeakDetector;
+    std::vector<Peak>       m_Peaks;
+	
+	short                   m_BPMCached;
+    	
     bool FindBoundingWarpMarkersForTime(double beatTime, WarpMarker::TimeSelector timeSelector, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker) const;
 	
 	bool FindBoundingWarpMarkersForBeatTime(double beatTime, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker) const;
     bool FindBoundingWarpMarkersForSampleTime(double sampleTime, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker) const;
 
+	bool ValidateWarpMarkerForAdd(const WarpMarker& warpMarkerToAdd);
+
     // Add default warp markers for beginning and end of clip
     bool AddDefaultWarpMarkers();
+
+	bool GetFirstWarpMarker(WarpMarker& outFirstWarpMarker) const;
+	bool GetLastWarpMarker(WarpMarker& outLastWarpMarker) const;
 
 public:
 
     // ...
     AClip::AClip() 
         :   m_PeakDetector(0),
-            m_BPMCached(BPM_CACHE_INVALID)
+            m_BPMCached(BPM_CACHE_INVALID),
+			m_LowAndHighBoundWarpMarkersCacheIsValid(false)
     {        
     }
 
@@ -76,12 +92,14 @@ public:
     double SampleToBeatTime(double SampleTime);
 
     // ...
-	void AddWarpMarker(double sampleTime, double beatTime) { m_WarpMarkers.push_back(WarpMarker(sampleTime, beatTime)); }
+	bool AddWarpMarker(double sampleTime, double beatTime);
 
 	void SetPeakDetector(PeakDetector* peakDetector) { m_PeakDetector = peakDetector; }
     bool GetBPM(unsigned int& bpmCount) const;
     
     void Analyze();
+
+	double GetDuration() const;
 };
 
 

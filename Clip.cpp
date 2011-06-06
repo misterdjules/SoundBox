@@ -11,6 +11,9 @@
 #include "wavfilereader.h"
 #include "mathutils.h"
 
+#define TIME_RELATIVE_TOLERANCE (1.0 / (44100 * 10))
+#define TIME_ABSOLUTE_TOLERANCE (1.0 / (44100 * 10))
+
 double WarpMarker::SampleTimeSelector(const WarpMarker& warpMarker)
 {
 	return warpMarker.GetSampleTime();
@@ -21,22 +24,145 @@ double WarpMarker::BeatTimeSelector(const WarpMarker& warpMarker)
 	return warpMarker.GetBeatTime();
 }
 
-bool AClip::AddDefaultWarpMarkers()
+bool WarpMarker::operator==(const WarpMarker& rhs) const
 {
-    // First default warp marker at clip's first sample
-    m_WarpMarkers.push_back(WarpMarker(0.0, 0.0));
+	if (this == &rhs)
+	{
+		return true;
+	}
+	
+	return m_SampleTime == rhs.m_SampleTime && m_BeatTime == rhs.m_BeatTime;
+}
+
+
+bool AClip::ValidateWarpMarkerForAdd(const WarpMarker& warpMarkerToAdd)
+{	
+	double sampleTimeToAdd = warpMarkerToAdd.GetSampleTime();
+	double beatTimeToAdd = warpMarkerToAdd.GetBeatTime();
+	
+	if (sampleTimeToAdd < 0.0 || 
+		(!AlmostEqualWithTolerance(sampleTimeToAdd, GetDuration(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE) && sampleTimeToAdd > GetDuration()) || 
+		beatTimeToAdd < 0.0)
+	{
+		return false;
+	}
+
+	WarpMarker lowBoundWarpMarkerSampleTime;
+	WarpMarker highBoundWarpMarkerSampleTime;
+	if (!FindBoundingWarpMarkersForSampleTime(warpMarkerToAdd.GetSampleTime(), lowBoundWarpMarkerSampleTime, highBoundWarpMarkerSampleTime))
+	{
+		return true;
+	}
+
+	WarpMarker lowBoundWarpMarkerBeatTime;
+	WarpMarker highBoundWarpMarkerBeatTime;
+	if (!FindBoundingWarpMarkersForBeatTime(warpMarkerToAdd.GetBeatTime(), lowBoundWarpMarkerBeatTime, highBoundWarpMarkerBeatTime))
+	{
+		return false;
+	}
+
+	if (lowBoundWarpMarkerBeatTime != lowBoundWarpMarkerSampleTime || highBoundWarpMarkerBeatTime != highBoundWarpMarkerSampleTime)
+	{
+		return false;
+	}
+
+	if (AlmostEqualWithTolerance(sampleTimeToAdd, lowBoundWarpMarkerSampleTime.GetSampleTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)	||
+		AlmostEqualWithTolerance(sampleTimeToAdd, highBoundWarpMarkerSampleTime.GetSampleTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)	||
+		AlmostEqualWithTolerance(beatTimeToAdd, lowBoundWarpMarkerSampleTime.GetBeatTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)		||
+		AlmostEqualWithTolerance(beatTimeToAdd, lowBoundWarpMarkerSampleTime.GetBeatTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+bool AClip::AddDefaultWarpMarkers()
+{    
+	// First default warp marker at clip's first sample
+    if (!AddWarpMarker(0.0, 0.0))
+	{
+		return false;
+	}
     
     // Second default warp marker at end of clip
     if (!m_Samples.empty() && m_AudioInfo.m_SampleRate)
     {
         double duration = m_Samples.size() / m_AudioInfo.m_SampleRate;
-        m_WarpMarkers.push_back(WarpMarker(duration, duration));
+        if (!AddWarpMarker(duration, duration))
+		{
+			return false;
+		}
 
 		return true;
     }
 
 	return false;
 }
+
+bool AClip::GetFirstWarpMarker(WarpMarker& outFirstWarpMarker) const
+{
+	if (m_WarpMarkers.empty())
+	{
+		return false;
+	}
+
+	outFirstWarpMarker = *m_WarpMarkers.begin();
+	double minSampleTime = outFirstWarpMarker.GetSampleTime();
+	
+	std::vector<WarpMarker>::const_iterator itWarpMarkers = m_WarpMarkers.begin();
+	std::vector<WarpMarker>::const_iterator itWarpMarkersEnd = m_WarpMarkers.end();
+	for (; itWarpMarkers != itWarpMarkersEnd; ++itWarpMarkers)
+	{
+		double currentWarpMarkerSampleTime = itWarpMarkers->GetSampleTime();
+		if (currentWarpMarkerSampleTime < minSampleTime)
+		{
+			minSampleTime = currentWarpMarkerSampleTime;
+			outFirstWarpMarker = *itWarpMarkers;
+		}
+	}
+
+	return true;
+}
+
+bool AClip::GetLastWarpMarker(WarpMarker& outLastWarpMarker) const
+{
+	if (m_WarpMarkers.empty())
+	{
+		return false;
+	}
+
+	outLastWarpMarker = *m_WarpMarkers.begin();
+	double maxSampleTime = outLastWarpMarker.GetSampleTime();
+	
+	std::vector<WarpMarker>::const_iterator itWarpMarkers = m_WarpMarkers.begin();
+	std::vector<WarpMarker>::const_iterator itWarpMarkersEnd = m_WarpMarkers.end();
+	for (; itWarpMarkers != itWarpMarkersEnd; ++itWarpMarkers)
+	{
+		double currentWarpMarkerSampleTime = itWarpMarkers->GetSampleTime();
+		if (currentWarpMarkerSampleTime > maxSampleTime)
+		{
+			maxSampleTime = currentWarpMarkerSampleTime;
+			outLastWarpMarker = *itWarpMarkers;
+		}
+	}
+
+	return true;
+}
+
+bool AClip::AddWarpMarker(double sampleTime, double beatTime)
+{
+	if (!ValidateWarpMarkerForAdd(WarpMarker(sampleTime, beatTime)))
+	{
+		return false;
+	}
+
+	m_WarpMarkers.push_back(WarpMarker(sampleTime, beatTime)); 
+	m_LowAndHighBoundWarpMarkersCacheIsValid = false;
+
+	return true;
+}
+
 
 bool AClip::FindBoundingWarpMarkersForTime(double time, WarpMarker::TimeSelector timeSelector, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker) const
 {    
@@ -48,29 +174,35 @@ bool AClip::FindBoundingWarpMarkersForTime(double time, WarpMarker::TimeSelector
         return false;
     }
 
-    lowBoundMarker = m_WarpMarkers.front();
-    highBoundMarker = m_WarpMarkers.back();
+    if (!GetFirstWarpMarker(lowBoundMarker))
+	{
+		return false;
+	}
 
-    std::vector<WarpMarker>::const_iterator itWarpMakers = m_WarpMarkers.begin();
-    std::vector<WarpMarker>::const_iterator itWarpMakersEnd = m_WarpMarkers.end();
-    for (; itWarpMakers != itWarpMakersEnd; ++itWarpMakers)
+    if (!GetLastWarpMarker(highBoundMarker))
+	{
+		return false;
+	}
+
+    std::vector<WarpMarker>::const_iterator itWarpMarkers = m_WarpMarkers.begin();
+    std::vector<WarpMarker>::const_iterator itWarpMarkersEnd = m_WarpMarkers.end();
+    for (; itWarpMarkers != itWarpMarkersEnd; ++itWarpMarkers)
     {
-        double currentWarpMarkerTime = timeSelector(*itWarpMakers);
+        double currentWarpMarkerTime = timeSelector(*itWarpMarkers);
         if ((currentWarpMarkerTime < time || AlmostEqualWithTolerance(currentWarpMarkerTime, time, TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)) &&
 			currentWarpMarkerTime > timeSelector(lowBoundMarker))
         {
-            lowBoundMarker = *itWarpMakers;
+            lowBoundMarker = *itWarpMarkers;
 			continue;
         }
 
-        if ((currentWarpMarkerTime > time || AlmostEqualWithTolerance(currentWarpMarkerTime, time, TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE))&&
-			currentWarpMarkerTime < timeSelector(highBoundMarker))
+        if (currentWarpMarkerTime > time && currentWarpMarkerTime < timeSelector(highBoundMarker))
         {
-            highBoundMarker = *itWarpMakers;
+            highBoundMarker = *itWarpMarkers;
         }
-    }
-
-    return true;
+    }	
+    
+	return true;
 }
 
 bool AClip::FindBoundingWarpMarkersForSampleTime(double sampleTime, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker) const
@@ -87,11 +219,34 @@ bool AClip::FindBoundingWarpMarkersForBeatTime(double beatTime, WarpMarker& lowB
 
 double AClip::BeatToSampleTime(double BeatTime)
 {
-    WarpMarker lowBoundMarker, highBoundMarker;
-    bool foundBoundingMarkers = FindBoundingWarpMarkersForBeatTime(BeatTime, lowBoundMarker, highBoundMarker);
+    bool foundBoundingMarkers = false;
+	WarpMarker lowBoundMarker, highBoundMarker;
+
+	if (m_LowAndHighBoundWarpMarkersCacheIsValid)
+	{
+		if ((BeatTime > m_CurrentCachedLowBoundWarpMarker.GetBeatTime() || AlmostEqualWithTolerance(BeatTime, m_CurrentCachedLowBoundWarpMarker.GetBeatTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)) &&
+			BeatTime < m_CurrentCachedHighBoundWarpMarker.GetBeatTime())
+		{
+			lowBoundMarker = m_CurrentCachedLowBoundWarpMarker;
+			highBoundMarker = m_CurrentCachedHighBoundWarpMarker;
+			foundBoundingMarkers = true;
+		}
+	}
+
+	if (!foundBoundingMarkers)
+	{
+		foundBoundingMarkers = FindBoundingWarpMarkersForBeatTime(BeatTime, lowBoundMarker, highBoundMarker);
+	}
+
     if (foundBoundingMarkers)
-    {
-        double linearMappedSampleTime = LinearMap(BeatTime, lowBoundMarker.GetBeatTime(), highBoundMarker.GetBeatTime(), lowBoundMarker.GetSampleTime(), highBoundMarker.GetSampleTime());
+    {        
+		m_CurrentCachedLowBoundWarpMarker = lowBoundMarker;
+		m_CurrentCachedHighBoundWarpMarker = highBoundMarker;
+		m_LowAndHighBoundWarpMarkersCacheIsValid = true;
+
+		double linearMappedSampleTime = LinearMap(	BeatTime, 
+													lowBoundMarker.GetBeatTime(), highBoundMarker.GetBeatTime(), 
+													lowBoundMarker.GetSampleTime(), highBoundMarker.GetSampleTime());
         return linearMappedSampleTime;
     }
 
@@ -103,13 +258,36 @@ double AClip::BeatToSampleTime(double BeatTime)
 
 double AClip::SampleToBeatTime(double SampleTime)
 {
+	bool foundBoundingMarkers = false;
 	WarpMarker lowBoundMarker, highBoundMarker;
-    bool foundBoundingMarkers = FindBoundingWarpMarkersForSampleTime(SampleTime, lowBoundMarker, highBoundMarker);
-    if (foundBoundingMarkers)
-    {
-		double linearMappedBeatTime = LinearMap(SampleTime, lowBoundMarker.GetSampleTime(), highBoundMarker.GetSampleTime(), lowBoundMarker.GetBeatTime(), highBoundMarker.GetBeatTime());
-        return linearMappedBeatTime;
-    }
+
+	if (m_LowAndHighBoundWarpMarkersCacheIsValid)
+	{
+		if ((SampleTime > m_CurrentCachedLowBoundWarpMarker.GetSampleTime() || AlmostEqualWithTolerance(SampleTime, m_CurrentCachedLowBoundWarpMarker.GetSampleTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)) &&
+			SampleTime < m_CurrentCachedHighBoundWarpMarker.GetSampleTime())
+		{
+			lowBoundMarker = m_CurrentCachedLowBoundWarpMarker;
+			highBoundMarker = m_CurrentCachedHighBoundWarpMarker;
+			foundBoundingMarkers = true;
+		}
+	}
+	
+	if (!foundBoundingMarkers)
+	{		
+		foundBoundingMarkers = FindBoundingWarpMarkersForSampleTime(SampleTime, lowBoundMarker, highBoundMarker);		
+	}
+
+	if (foundBoundingMarkers)
+	{
+		m_CurrentCachedLowBoundWarpMarker = lowBoundMarker;
+		m_CurrentCachedHighBoundWarpMarker = highBoundMarker;
+		m_LowAndHighBoundWarpMarkersCacheIsValid = true;
+
+		double linearMappedBeatTime = LinearMap(SampleTime, 
+			lowBoundMarker.GetSampleTime(), highBoundMarker.GetSampleTime(), 
+			lowBoundMarker.GetBeatTime(), highBoundMarker.GetBeatTime());
+		return linearMappedBeatTime;
+	}
 
     return 0.0;
 }
@@ -176,6 +354,15 @@ bool AClip::GetBPM(unsigned int& bpmCount) const
     return false;
 }
 
+double AClip::GetDuration() const
+{ 
+	if (m_Samples.empty())
+	{
+		return 0.0;
+	}
+
+	return m_Samples.size() / m_AudioInfo.m_SampleRate;
+}
 
 //****************************************************************************************
 //                                       E O F

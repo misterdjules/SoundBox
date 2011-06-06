@@ -1,4 +1,5 @@
 #include <iostream>
+#include <cstdlib>
 
 #include "simplepeakdetector.h"
 #include "Clip.h"
@@ -15,9 +16,20 @@ int main(int argc, char* argv[])
 	myTestClip.SetPeakDetector(&simplePeakDetector);
     myTestClip.Analyze();
 
-	myTestClip.AddWarpMarker(1.0, 2.0);
-	myTestClip.AddWarpMarker(2.0, 4.0);
-	myTestClip.AddWarpMarker(3.0, 6.0);
+	if (!myTestClip.AddWarpMarker(1.0, 2.0))
+	{
+		std::cerr << "Couldn't add warp marker, exiting..." << std::endl;
+	}
+
+	if (!myTestClip.AddWarpMarker(2.0, 4.0))
+	{
+		std::cerr << "Couldn't add warp marker, exiting..." << std::endl;
+	}
+
+	if (!myTestClip.AddWarpMarker(3.0, 6.0))
+	{
+		std::cerr << "Couldn't add warp marker, exiting..." << std::endl;
+	}
 	
 	for (double currentSampleTime = 0.0; currentSampleTime < 4.0; currentSampleTime += 0.1)
 	{

@@ -1,6 +1,3 @@
-#define TIME_RELATIVE_TOLERANCE 1.0 / 44100
-#define TIME_ABSOLUTE_TOLERANCE 1.0 / 44100
-
 #include <cmath>
 
 template <typename _FloatingPointType>
@@ -30,7 +27,8 @@ bool AlmostEqualWithTolerance(_FloatingPointType A, _FloatingPointType B, _Float
 }
 
 template <typename _NumType> 
-_NumType LinearMap(_NumType value, _NumType originalRangeLowBound, 
+_NumType LinearMap(_NumType value, 
+				   _NumType originalRangeLowBound, 
 				   _NumType originalRangeHighBound, 
 				   _NumType targetRangeLowBound, 
 				   _NumType targetRangeHighBound)
