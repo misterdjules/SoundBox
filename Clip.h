@@ -12,10 +12,6 @@
 #include "audioformats.h"
 #include "peakdetector.h"
 
-#define BPM_CACHE_INVALID -1
-
-class BPMCounter;
-
 //========================================================================================
 
 class WarpMarker
@@ -55,7 +51,8 @@ private:
 	PeakDetector*           m_PeakDetector;
     std::vector<Peak>       m_Peaks;
 	
-	short                   m_BPMCached;
+	bool			m_BPMCached;
+	double			m_BPMCachedValue;
     	
     bool FindBoundingWarpMarkersForTime(double beatTime, WarpMarker::TimeSelector timeSelector, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker) const;
 	
@@ -70,12 +67,15 @@ private:
 	bool GetFirstWarpMarker(WarpMarker& outFirstWarpMarker) const;
 	bool GetLastWarpMarker(WarpMarker& outLastWarpMarker) const;
 
+	bool ComputeBPM(const std::vector<Peak>& peaks, double& outBpmCount) const;
+
 public:
 
     // ...
     AClip::AClip() 
         :   m_PeakDetector(0),
-            m_BPMCached(BPM_CACHE_INVALID),
+            m_BPMCached(false),
+			m_BPMCachedValue(0.0),
 			m_LowAndHighBoundWarpMarkersCacheIsValid(false)
     {        
     }
@@ -95,9 +95,7 @@ public:
 	bool AddWarpMarker(double sampleTime, double beatTime);
 
 	void SetPeakDetector(PeakDetector* peakDetector) { m_PeakDetector = peakDetector; }
-    bool GetBPM(unsigned int& bpmCount) const;
-    
-    void Analyze();
+    bool GetBPM(double& bpmCount);       
 
 	double GetDuration() const;
 };

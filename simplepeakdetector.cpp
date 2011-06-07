@@ -48,7 +48,7 @@ void SimplePeakDetector::ProcessAudio(double input)
     // Step 3 : Schmitt trigger
     if (!m_BeatTrigger)
     {
-        if (m_PeakEnv > .3)
+        if (m_PeakEnv > .5)
         {
             m_BeatTrigger=true;
         }

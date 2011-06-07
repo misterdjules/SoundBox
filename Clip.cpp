@@ -326,12 +326,50 @@ bool AClip::LoadDataFromFile(const std::string& filePath)
     return samplesReadSuccessfuly;
 }
 
-void AClip::Analyze()
+bool AClip::ComputeBPM(const std::vector<Peak>& peaks, double& outBpmCount) const
 {
-       
+	// Compute the average distance between peaks as a very very simplistic 
+	// approximation of BPM	
+	if (peaks.size() <= 1)
+	{
+		return false;
+	}
+
+	if (!AudioInfo::CheckAudioInfo(m_AudioInfo))
+	{
+		return false;
+	}
+
+	double clipSampleRate = m_AudioInfo.m_SampleRate;
+	if (clipSampleRate == 0.0)
+	{
+		return false;
+	}
+
+	Peak prevPeak = *peaks.begin();
+	double diffBetweenPeaksSum = 0.0;
+
+	std::vector<Peak>::const_iterator itPeaks = peaks.begin();
+	std::vector<Peak>::const_iterator itPeaksEnd = peaks.end();
+	for (++itPeaks; itPeaks != itPeaksEnd; ++itPeaks)
+	{
+		double prevPeakTime = prevPeak.GetPeakSampleIndex() / clipSampleRate;	
+		diffBetweenPeaksSum += (itPeaks->GetPeakSampleIndex() / clipSampleRate) - prevPeakTime;
+		prevPeak = *itPeaks;
+	}
+
+	double avgTimeBetweenPeaks = diffBetweenPeaksSum / peaks.size();
+	if (avgTimeBetweenPeaks == 0.0)
+	{
+		return false;
+	}
+
+	outBpmCount = 60.0 / avgTimeBetweenPeaks;
+	
+	return true;
 }
 
-bool AClip::GetBPM(unsigned int& bpmCount) const
+bool AClip::GetBPM(double& bpmCount) // non const because we actually modify the AClip instance
 {
     bpmCount = 0;
     if (!m_PeakDetector)
@@ -339,9 +377,9 @@ bool AClip::GetBPM(unsigned int& bpmCount) const
         return false;
     }
 
-    if (m_BPMCached != BPM_CACHE_INVALID)
+    if (m_BPMCached)
     {
-        bpmCount = m_BPMCached;
+        bpmCount = m_BPMCachedValue;
 		return true;
     }
 
@@ -349,6 +387,13 @@ bool AClip::GetBPM(unsigned int& bpmCount) const
     {
         std::vector<Peak>   peaks;
         m_PeakDetector->GetPeaks(m_Samples, m_AudioInfo, peaks);
+		
+		if (ComputeBPM(peaks, bpmCount))
+		{
+			m_BPMCached = true;
+			m_BPMCachedValue = bpmCount;
+			return true;
+		}
     }
 
     return false;

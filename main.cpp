@@ -14,7 +14,6 @@ int main(int argc, char* argv[])
     
 	SimplePeakDetector simplePeakDetector;        
 	myTestClip.SetPeakDetector(&simplePeakDetector);
-    myTestClip.Analyze();
 
 	if (!myTestClip.AddWarpMarker(1.0, 2.0))
 	{
@@ -31,7 +30,7 @@ int main(int argc, char* argv[])
 		std::cerr << "Couldn't add warp marker, exiting..." << std::endl;
 	}
 	
-	for (double currentSampleTime = 0.0; currentSampleTime < 4.0; currentSampleTime += 0.1)
+	for (double currentSampleTime = 0.0; currentSampleTime < myTestClip.GetDuration(); currentSampleTime += 0.1)
 	{
 		std::cout << "Sample time: " << currentSampleTime << ", beat time: " << myTestClip.SampleToBeatTime(currentSampleTime) << std::endl;
 	}
@@ -41,7 +40,7 @@ int main(int argc, char* argv[])
 		std::cout << "Beat time: " << currentBeatTime << ", sample time: " << myTestClip.BeatToSampleTime(currentBeatTime) << std::endl;
 	}
 
-    unsigned int bpmCount = 0;
+    double bpmCount = 0.0;
     if (myTestClip.GetBPM(bpmCount))
     {
         std::cout << "BPM: " << bpmCount << std::endl;
