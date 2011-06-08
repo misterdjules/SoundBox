@@ -5,6 +5,9 @@
 //****************************************************************************************
 #include <fstream>
 #include <iostream>
+#include <cassert>
+#include <algorithm>
+#include <functional>
 
 #include "Clip.h"
 #include "simplepeakdetector.h"
@@ -86,18 +89,18 @@ bool AClip::AddDefaultWarpMarkers()
 	}
     
     // Second default warp marker at end of clip
-    if (!m_Samples.empty() && m_AudioInfo.m_SampleRate)
+	if (!AudioInfo::CheckAudioInfo(m_AudioInfo))
     {
-        double duration = m_Samples.size() / m_AudioInfo.m_SampleRate;
-        if (!AddWarpMarker(duration, duration))
-		{
-			return false;
-		}
+		return false;
+	}
 
-		return true;
-    }
+	double duration = GetDuration();
+	if (!AddWarpMarker(duration, duration))
+	{
+		return false;
+	}
 
-	return false;
+	return true;
 }
 
 bool AClip::GetFirstWarpMarker(WarpMarker& outFirstWarpMarker) const
@@ -316,14 +319,71 @@ bool AClip::LoadDataFromFile(const std::string& filePath)
     {
         std::cerr << "More than one channel is not supported at this time." << std::endl;
     }    
+	
+	const unsigned int INPUT_WINDOW_SIZE	= SimplePeakDetector::INPUT_WINDOW_SIZE;
+	const unsigned int INPUT_WINDOW_OFFSET	= SimplePeakDetector::INPUT_WINDOW_OFFSET;
+	
+	float samples[INPUT_WINDOW_SIZE];
+	memset(samples, 0, INPUT_WINDOW_SIZE * sizeof(float));
 
-    bool samplesReadSuccessfuly = WavFileReader::ReadSamples(wavInputStream, m_AudioInfo, m_Samples);
+	unsigned int samplesLeftToRead = m_AudioInfo.m_NbSamples;
+	unsigned int samplesRead = 0;
+
+	// First, read a full "window" of samples to feed the peak detector
+	if (!WavFileReader::ReadSamples(wavInputStream, m_AudioInfo, 
+									samplesLeftToRead > INPUT_WINDOW_SIZE ? INPUT_WINDOW_SIZE : samplesLeftToRead, 
+									samples, samplesRead))
+	{
+		return false;
+	}
+
+	// Make sure samplesRead is consistent
+	assert(INPUT_WINDOW_SIZE - samplesRead >= 0);
+	if (samplesRead < INPUT_WINDOW_SIZE)
+	{
+		// Pad the "samples" array with 0 doubles in case we read less than a full window		
+		memset(samples + samplesRead, 0, (INPUT_WINDOW_SIZE - samplesRead) * sizeof(float));
+	}
+	
+	// Detect peaks for the first chunk of samples
+	std::vector<Peak> foundPeaks;
+	if (m_PeakDetector)
+	{
+		m_PeakDetector->GetPeaks(samples, INPUT_WINDOW_SIZE, m_AudioInfo, foundPeaks);
+	}
+
+	samplesLeftToRead -= samplesRead;
+	
+	// Until there's no samples left to read, move the "window" of samples forward in the data by INPUT_WINDOW_OFFSET samples
+	// This way, we make sure that we don't miss any peak that would have overlapped two adjacent windows
+	while (samplesLeftToRead && WavFileReader::ReadSamples(	wavInputStream, m_AudioInfo, 
+															(samplesLeftToRead > INPUT_WINDOW_SIZE - INPUT_WINDOW_OFFSET) ? INPUT_WINDOW_SIZE - INPUT_WINDOW_OFFSET : samplesLeftToRead, 
+															samples + INPUT_WINDOW_OFFSET, samplesRead))
+	{
+		if (m_PeakDetector)
+		{
+			std::vector<Peak> peaksFoundInCurrentWindow;
+			m_PeakDetector->GetPeaks(samples, INPUT_WINDOW_SIZE, m_AudioInfo, peaksFoundInCurrentWindow);
+			std::for_each(peaksFoundInCurrentWindow.begin(), peaksFoundInCurrentWindow.end(), Peak::OffsetByFunctor(m_AudioInfo.m_NbSamples - samplesLeftToRead));
+			std::copy(peaksFoundInCurrentWindow.begin(), peaksFoundInCurrentWindow.end(), std::insert_iterator<std::vector<Peak> >(foundPeaks, foundPeaks.end()));
+		}
+
+		memcpy(samples, samples + (INPUT_WINDOW_SIZE - INPUT_WINDOW_OFFSET), SimplePeakDetector::INPUT_WINDOW_OFFSET);
+		samplesLeftToRead -= samplesRead;		
+	}
     
-    wavInputStream.close();
+	wavInputStream.close();	
 
-	AddDefaultWarpMarkers();
+	if (samplesLeftToRead == 0)
+	{
+		return true;
+	}
 
-    return samplesReadSuccessfuly;
+    return false;    
+}
+
+void AClip::AddToPeaks(const std::vector<Peak>& peaksToAdd)
+{
 }
 
 bool AClip::ComputeBPM(const std::vector<Peak>& peaks, double& outBpmCount) const
@@ -368,7 +428,7 @@ bool AClip::ComputeBPM(const std::vector<Peak>& peaks, double& outBpmCount) cons
 	
 	return true;
 }
-
+		
 bool AClip::GetBPM(double& bpmCount) // non const because we actually modify the AClip instance
 {
     bpmCount = 0;
@@ -384,11 +444,8 @@ bool AClip::GetBPM(double& bpmCount) // non const because we actually modify the
     }
 
     if (m_AudioInfo.m_NbSamples)
-    {
-        std::vector<Peak>   peaks;
-        m_PeakDetector->GetPeaks(m_Samples, m_AudioInfo, peaks);
-		
-		if (ComputeBPM(peaks, bpmCount))
+    {        
+		if (ComputeBPM(m_Peaks, bpmCount))
 		{
 			m_BPMCached = true;
 			m_BPMCachedValue = bpmCount;
@@ -401,12 +458,12 @@ bool AClip::GetBPM(double& bpmCount) // non const because we actually modify the
 
 double AClip::GetDuration() const
 { 
-	if (m_Samples.empty())
+	if (!AudioInfo::CheckAudioInfo(m_AudioInfo))
 	{
 		return 0.0;
 	}
 
-	return m_Samples.size() / m_AudioInfo.m_SampleRate;
+	return m_AudioInfo.m_NbSamples / m_AudioInfo.m_SampleRate;
 }
 
 //****************************************************************************************

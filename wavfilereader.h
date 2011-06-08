@@ -16,7 +16,7 @@ private:
 
 public:   
     static bool ReadFormat(std::istream& inputStream, AudioInfo& outAudioInfo);
-    static bool ReadSamples(std::istream& inputStream, const AudioInfo& audioInfo, std::vector<double>& outSamples);
+	static bool ReadSamples(std::istream& inputStream,  const AudioInfo& audioInfo, unsigned int nbSamplesToRead, float* outSamples, unsigned int& outNbSamplesRead);
 }; 
 
 #endif // WAVFILEREADER_H_

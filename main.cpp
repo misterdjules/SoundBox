@@ -7,13 +7,16 @@
 int main(int argc, char* argv[])
 {
     AClip myTestClip;
-    if (!argv[1] || !myTestClip.LoadDataFromFile(argv[1]))
+    
+	SimplePeakDetector simplePeakDetector;        
+	myTestClip.SetPeakDetector(&simplePeakDetector);		
+
+	if (!argv[1] || !myTestClip.LoadDataFromFile(argv[1]))
     {
         return EXIT_FAILURE;
     }   	
     
-	SimplePeakDetector simplePeakDetector;        
-	myTestClip.SetPeakDetector(&simplePeakDetector);
+	myTestClip.AddDefaultWarpMarkers();
 
 	if (!myTestClip.AddWarpMarker(1.0, 2.0))
 	{

@@ -39,9 +39,7 @@ private:
 class AClip
 {
 private:
-    AudioInfo               m_AudioInfo;   	
-    
-	std::vector<double>     m_Samples;
+    AudioInfo               m_AudioInfo;   	    	
 
 	std::vector<WarpMarker> m_WarpMarkers;	
 	WarpMarker				m_CurrentCachedLowBoundWarpMarker;
@@ -51,8 +49,8 @@ private:
 	PeakDetector*           m_PeakDetector;
     std::vector<Peak>       m_Peaks;
 	
-	bool			m_BPMCached;
-	double			m_BPMCachedValue;
+	bool					m_BPMCached;
+	double					m_BPMCachedValue;
     	
     bool FindBoundingWarpMarkersForTime(double beatTime, WarpMarker::TimeSelector timeSelector, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker) const;
 	
@@ -60,15 +58,12 @@ private:
     bool FindBoundingWarpMarkersForSampleTime(double sampleTime, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker) const;
 
 	bool ValidateWarpMarkerForAdd(const WarpMarker& warpMarkerToAdd);
-
-    // Add default warp markers for beginning and end of clip
-    bool AddDefaultWarpMarkers();
-
+    
 	bool GetFirstWarpMarker(WarpMarker& outFirstWarpMarker) const;
 	bool GetLastWarpMarker(WarpMarker& outLastWarpMarker) const;
-
+	
 	bool ComputeBPM(const std::vector<Peak>& peaks, double& outBpmCount) const;
-
+		
 public:
 
     // ...
@@ -78,9 +73,9 @@ public:
 			m_BPMCachedValue(0.0),
 			m_LowAndHighBoundWarpMarkersCacheIsValid(false)
     {        
-    }
+    }	
 
-    // Fill internal data structures with content from file
+	// Fill internal data structures with content from file
     bool LoadDataFromFile(const std::string& filePath);
     
     // Convert a position in the sample that is given
@@ -92,10 +87,15 @@ public:
     double SampleToBeatTime(double SampleTime);
 
     // ...
+	// Add default warp markers for beginning and end of clip
+    bool AddDefaultWarpMarkers();
+
 	bool AddWarpMarker(double sampleTime, double beatTime);
 
 	void SetPeakDetector(PeakDetector* peakDetector) { m_PeakDetector = peakDetector; }
-    bool GetBPM(double& bpmCount);       
+	void AddToPeaks(const std::vector<Peak>& peaksToAdd);
+
+	bool GetBPM(double& bpmCount);       
 
 	double GetDuration() const;
 };

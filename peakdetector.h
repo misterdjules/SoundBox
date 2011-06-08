@@ -9,7 +9,7 @@
 class PeakDetector
 {
 public:
-    virtual bool GetPeaks(const std::vector<double>& samples, const AudioInfo& audioInfo, std::vector<Peak>& outPeaks) = 0;    
+    virtual bool GetPeaks(const float* samples, unsigned int nbSamples, const AudioInfo& audioInfo, std::vector<Peak>& outPeaks) = 0;	
 };
 
 #endif // PEAKDETECTOR_H_

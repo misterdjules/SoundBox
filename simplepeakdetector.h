@@ -10,23 +10,27 @@ class Peak;
 class SimplePeakDetector : public PeakDetector
 {
 private:
-    double  m_KBeatFilter;              // Filter coefficient
+    double  m_PeakFilter;				// Filter coefficient
     double  m_Filter1Out, m_Filter2Out;
-    double  m_BeatRelease;              // Release time coefficient
-    double  m_PeakEnv;                  // Peak enveloppe follower
-    bool    m_BeatTrigger;              // Schmitt trigger output
-    bool    m_PrevBeatPulse;            // Rising edge memory
+    double  m_PeakRelease;              // Release time coefficient
+    double  m_EnvelopePeak;             // Envelope follower
+    bool    m_PeakTrigger;              // Schmitt trigger output
+    bool    m_PrevPeakPulse;            // Rising edge memory
     
-    bool    m_BeatPulse;                // Beat detector output
-    
-    bool            GetBeatPulse() const { return m_BeatPulse; }
-    virtual void    ProcessAudio(double input);
-    void            SetSampleRate(unsigned int sampleRate);    
+    bool    m_PeakPulse;                // Peak detector output
+        
+	void Reset();	
+
+	virtual void    ProcessAudio(const float* inputSamples, unsigned int nbSamples, std::vector<Peak>& outPeaks);
 
 public:
-    SimplePeakDetector();
+	
+    static const unsigned int INPUT_WINDOW_SIZE		= 65536;
+	static const unsigned int INPUT_WINDOW_OFFSET	= 4096;	
+
+	SimplePeakDetector();
         
-    virtual bool GetPeaks(const std::vector<double>& samples, const AudioInfo& audioInfo, std::vector<Peak>& outPeaks);    
+    virtual bool GetPeaks(const float* samples, unsigned int nbSamples, const AudioInfo& audioInfo, std::vector<Peak>& outPeaks);
 };
 
 #endif // SIMPLEPEAKDETECTOR_H

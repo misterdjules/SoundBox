@@ -21,25 +21,22 @@ bool WavFileReader::ReadFormat(std::istream& inputStream, AudioInfo& outAudioInf
     return true;
 }
 
-bool WavFileReader::ReadSamples(std::istream& inputStream,  const AudioInfo& audioInfo, std::vector<double>& outSamples)
+bool WavFileReader::ReadSamples(std::istream& inputStream,  const AudioInfo& audioInfo, unsigned int nbSamplesToRead, float* outSamples, unsigned int& outNbSamplesRead)
 {
-    unsigned int currentSampleIdx = 0;
-    while (inputStream && currentSampleIdx < audioInfo.m_NbSamples)
-    {        
-        float sample = .0;
-        inputStream.read(reinterpret_cast<char*>(&sample), audioInfo.m_BitsPerSample / 8);
-        
-        outSamples.push_back(sample);
+    if (!AudioInfo::CheckAudioInfo(audioInfo))
+	{
+		return false;
+	}
+	
+	inputStream.read(reinterpret_cast<char*>(outSamples), nbSamplesToRead * (audioInfo.m_BitsPerSample / 8));
+		
+	if (!inputStream && (inputStream.gcount() / (audioInfo.m_BitsPerSample / 8)) != audioInfo.m_NbSamples)
+	{		
+		return false;
+	}
 
-        ++currentSampleIdx;
-    }       
-
-    if (currentSampleIdx == audioInfo.m_NbSamples)
-    {
-        return true;
-    }
-
-    return false;
+	outNbSamplesRead = nbSamplesToRead;
+	return true;
 }
 
 bool WavFileReader::CheckFirstFormatBlock(std::istream& inputStream)
