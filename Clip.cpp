@@ -382,10 +382,6 @@ bool AClip::LoadDataFromFile(const std::string& filePath)
     return false;    
 }
 
-void AClip::AddToPeaks(const std::vector<Peak>& peaksToAdd)
-{
-}
-
 bool AClip::ComputeBPM(const std::vector<Peak>& peaks, double& outBpmCount) const
 {
 	// Compute the average distance between peaks as a very very simplistic 
