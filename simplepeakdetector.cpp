@@ -37,11 +37,11 @@ void SimplePeakDetector::ProcessAudio(const float* inputSamples, unsigned int nb
 	{
 		double envelopeIn;
 
-		// Step 1 : 2nd order low pass filter (made of two 1st order RC filter)
+		// Filter data
 		m_Filter1Out = m_Filter1Out + (m_PeakFilter * (inputSamples[sampleIndex] - m_Filter1Out));
 		m_Filter2Out = m_Filter2Out + (m_PeakFilter * (m_Filter1Out - m_Filter2Out));
 
-		// Step 2 : peak detector
+		// Envelope follower
 		envelopeIn = fabs(m_Filter2Out);
 		if (envelopeIn > m_EnvelopePeak) 
 		{
@@ -53,7 +53,7 @@ void SimplePeakDetector::ProcessAudio(const float* inputSamples, unsigned int nb
 			m_EnvelopePeak += (1.0 - m_PeakRelease) * envelopeIn;
 		}
 
-		// Step 3 : Schmitt trigger
+		// Peak detector
 		if (!m_PeakTrigger)
 		{
 			if (m_EnvelopePeak > .5)
@@ -69,7 +69,6 @@ void SimplePeakDetector::ProcessAudio(const float* inputSamples, unsigned int nb
 			}
 		}
 
-		// Step 4 : rising edge detector		
 		if ((m_PeakTrigger) && (!m_PrevPeakPulse))
 		{			
 			outPeaks.push_back(Peak(sampleIndex, sampleIndex));
