@@ -8,6 +8,7 @@
 #define Clip_h
 
 #include <vector>
+#include <map>
 
 #include "audioformats.h"
 #include "peakdetector.h"
@@ -21,25 +22,24 @@
 class WarpMarker
 {
 public:
-    WarpMarker() : m_SampleTime(0.0), m_BeatTime(0.0) {}
-    WarpMarker(double sampleTime, double beatTime) : m_SampleTime(sampleTime), m_BeatTime(beatTime) {}
+    // It's alright to use 0.0 as a default value since it is defined as all bits set to 
+	// zero by the IEEE-754 standard.
+	WarpMarker() : m_SampleIndex(0), m_SampleTime(0.0), m_BeatTime(0.0) {}
+    WarpMarker(double sampleTime, double beatTime);
+	WarpMarker(unsigned int sampleIndex, double beatTime);
 
 	bool operator==(const WarpMarker& rhs) const;
 	bool operator!=(const WarpMarker& rhs) const { return !operator==(rhs); }
 
-    double GetBeatTime()	const { return m_BeatTime;		}
-    double GetSampleTime()	const { return m_SampleTime;	}
-	
-	typedef double (*TimeSelector)(const WarpMarker& warpMarker);
-
-	// These two static methods of type TimeSelector provide function pointers to be used as shortcuts by 
-	// algorithm working either with beat time or sample time
-	static double SampleTimeSelector(const WarpMarker& warpMarker);
-	static double BeatTimeSelector(const WarpMarker& warpMarker);
+    double GetBeatTime() const { return m_BeatTime; }
+    
+	double			GetSampleTime()		const		{ return m_SampleTime;							}
+	unsigned int	GetSampleIndex()	const		{ return m_SampleIndex;							}	
 
 private:
-    double m_SampleTime;
-    double m_BeatTime;
+    unsigned int	m_SampleIndex;
+	double			m_SampleTime;
+    double			m_BeatTime;
 };
 
 /**
@@ -50,9 +50,10 @@ class AClip
 private:
     AudioInfo               m_AudioInfo;   	    	
 
-	// We use warp markers to match a sample time with a beat time, and conversely
-	std::vector<WarpMarker> m_WarpMarkers;	
-	
+	// We use warp markers to match a sample time with a beat time, and conversely			
+	std::map<unsigned int,	WarpMarker*>	m_SampleIndexToWarpMarker;
+	std::map<double,		WarpMarker*>	m_BeatTimeToWarpMarker;
+
 	// When calling SampleToBeatTime or BeatToSampleTime repeatedly over lots of subsequent samples,
 	// we try to cache the last found warp marker so that we don't iterate over
 	// the whole array of warp markes (m_WarpMarkers) every time.
@@ -60,6 +61,7 @@ private:
 	WarpMarker				m_CurrentCachedHighBoundWarpMarker;
 	bool					m_LowAndHighBoundWarpMarkersCacheIsValid;
 	
+	// this points to memory allocated by the user, do not handle its deallocation
 	PeakDetector*           m_PeakDetector;
     std::vector<Peak>       m_Peaks;
 	
@@ -68,14 +70,21 @@ private:
 	bool					m_BPMCached;
 	double					m_BPMCachedValue;
     	
-	// SampleToBeatTime and BeatToSampleTime both try to find bounding warp markers to 
-	// perform a linear interpolation, using FindBoundingWarpMarkersForSampleTime and FindBoundingWarpMarkersForBeatTime respectively.
-	// FindBoundingWarpMarkersForTime is used by both of them.
-	// They all return true if a pair of bounding warp markers could be found, storing them in lowBoundMarker and highBoundMarker
-    bool FindBoundingWarpMarkersForTime(double beatTime, WarpMarker::TimeSelector timeSelector, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker) const;
+	// Returns true if a warp marker which similar sample index already 
+	// exists in this AClip instance
+	bool SampleIndexKeyAlreadyExists(unsigned int sampleIndex) const;
 	
-	bool FindBoundingWarpMarkersForBeatTime(double beatTime, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker) const;
-    bool FindBoundingWarpMarkersForSampleTime(double sampleTime, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker) const;
+	// Returns true if a warp marker which similar beat time already 
+	// exists in this AClip instance	
+	bool BeatTimeKeyAlreadyExists(double sampleIndex) const;
+
+	// SampleToBeatTime and BeatToSampleTime both try to find bounding warp markers to 
+	// perform a linear interpolation
+	// They return true if a pair of bounding warp markers could be found, storing them in lowBoundMarker and highBoundMarker    
+	bool FindBoundingWarpMarkersForBeatTime(double beatTime, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker);
+    
+	bool FindBoundingWarpMarkersForSampleIndex(unsigned int sampleIndex, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker);
+	bool FindBoundingWarpMarkersForSampleTime(double sampleTime, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker);
 
 	// Returns true if data in warpMarkerToAdd is consistent, false otherwise
 	bool ValidateWarpMarkerForAdd(const WarpMarker& warpMarkerToAdd);
@@ -100,6 +109,8 @@ public:
 			m_LowAndHighBoundWarpMarkersCacheIsValid(false)
     {        
     }	
+
+	~AClip();
 
 	// Fill internal data structures with content from file
 	// Feeds the peak detector, too. 

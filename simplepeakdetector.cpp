@@ -2,10 +2,10 @@
 #include <cmath>
 #include <cassert>
 
+#include "audioconfig.h"
 #include "simplepeakdetector.h"
 #include "Clip.h"
 
-#define DEFAULT_SAMPLE_RATE 44100
 #define FREQ_LP_BEAT		150.0f								// Low Pass filter frequency, in HZ
 #define T_FILTER			1.0f / (2.0f * M_PI * FREQ_LP_BEAT)	// Low Pass filter time constant
 #define BEAT_RELEASE_TIME	0.2f								// Release time of envelope detector, in second

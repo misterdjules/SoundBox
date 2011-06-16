@@ -6,7 +6,7 @@
 
 int main(int argc, char* argv[])
 {
-    AClip myTestClip;
+	AClip myTestClip;
     
 	SimplePeakDetector simplePeakDetector;        
 	myTestClip.SetPeakDetector(&simplePeakDetector);		

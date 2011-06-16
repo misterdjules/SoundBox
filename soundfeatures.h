@@ -4,11 +4,11 @@
 class Peak
 {
 private:
-    double m_PeakSampleIndex;
-    double m_AttackSampleIndex;    
+    unsigned int m_PeakSampleIndex;
+    unsigned int m_AttackSampleIndex;
 
 public:
-    Peak(double peakSampleIndex, double attackSampleIndex) 
+    Peak(unsigned int peakSampleIndex, unsigned int attackSampleIndex) 
         : m_PeakSampleIndex(peakSampleIndex), m_AttackSampleIndex(attackSampleIndex)
     {}    
     
@@ -30,11 +30,11 @@ public:
 		}
 	};
 
-	void SetPeakSampleIndex(double peakSampleIndex) { m_PeakSampleIndex = peakSampleIndex; }
-	void SetAttackSampleIndex(double attackSampleIndex) { m_AttackSampleIndex = attackSampleIndex; }
+	void SetPeakSampleIndex(unsigned int peakSampleIndex) { m_PeakSampleIndex = peakSampleIndex; }
+	void SetAttackSampleIndex(unsigned int attackSampleIndex) { m_AttackSampleIndex = attackSampleIndex; }
 
-    double GetPeakSampleIndex() const { return m_PeakSampleIndex; }
-    double GetAttackSampleIndex() const { return m_AttackSampleIndex; }
+    unsigned int GetPeakSampleIndex() const { return m_PeakSampleIndex; }
+    unsigned int GetAttackSampleIndex() const { return m_AttackSampleIndex; }
 };
 
 #endif // SOUNDFEATURES_H_

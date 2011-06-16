@@ -8,25 +8,28 @@
 #include <cassert>
 #include <algorithm>
 #include <functional>
+#include <cmath>
 
+#include "audioconfig.h"
 #include "Clip.h"
 #include "simplepeakdetector.h"
 #include "wavfilereader.h"
 #include "mathutils.h"
 
-#define TIME_RELATIVE_TOLERANCE (1.0 / (44100 * 10))
-#define TIME_ABSOLUTE_TOLERANCE (1.0 / (44100 * 10))
+#define TIME_RELATIVE_TOLERANCE (1.0 / (DEFAULT_SAMPLE_RATE * 10))
+#define TIME_ABSOLUTE_TOLERANCE (1.0 / (DEFAULT_SAMPLE_RATE * 10))
 
-double WarpMarker::SampleTimeSelector(const WarpMarker& warpMarker)
+WarpMarker::WarpMarker(double sampleTime, double beatTime)
+: m_SampleTime(sampleTime), m_BeatTime(beatTime) 
 {
-	return warpMarker.GetSampleTime();
+	m_SampleIndex = MathUtils::Round(sampleTime * DEFAULT_SAMPLE_RATE);
 }
 
-double WarpMarker::BeatTimeSelector(const WarpMarker& warpMarker)
+WarpMarker::WarpMarker(unsigned int sampleIndex, double beatTime)
+: m_SampleIndex(sampleIndex), m_BeatTime(beatTime)
 {
-	return warpMarker.GetBeatTime();
+	
 }
-
 bool WarpMarker::operator==(const WarpMarker& rhs) const
 {
 	if (this == &rhs)
@@ -34,26 +37,97 @@ bool WarpMarker::operator==(const WarpMarker& rhs) const
 		return true;
 	}
 	
-	return m_SampleTime == rhs.m_SampleTime && m_BeatTime == rhs.m_BeatTime;
+	return	m_SampleIndex	== rhs.m_SampleIndex	&& 
+			m_BeatTime		== rhs.m_BeatTime		&&
+			m_SampleTime	== rhs.m_SampleTime;
 }
 
+AClip::~AClip()
+{	
+	// deallocate WarpMarker instances
+	std::map<unsigned int, WarpMarker*>::iterator itWarpMarkers = m_SampleIndexToWarpMarker.begin();
+	std::map<unsigned int, WarpMarker*>::iterator itWarpMarkersEnd = m_SampleIndexToWarpMarker.end();
+	for (; itWarpMarkers != itWarpMarkersEnd; ++itWarpMarkers)
+	{
+		WarpMarker* warpMarkerToDelete = itWarpMarkers->second;
+		if (warpMarkerToDelete)
+		{
+			delete warpMarkerToDelete;
+			itWarpMarkers->second = 0;
+		}
+	}
+
+	// Then it's safe to clear both maps
+	m_SampleIndexToWarpMarker.clear();
+	m_BeatTimeToWarpMarker.clear();
+}
+
+bool AClip::SampleIndexKeyAlreadyExists(unsigned int sampleIndex) const
+{
+	// A simple find might not be sufficient here to insure that our data is valid
+	// Adding two warp markers to adjacent samples, or samples that are very close 
+	// to each other in the physical signal may not be a good idea...
+	std::map<unsigned int, WarpMarker*>::const_iterator itSampleIndexToWarpMarker = m_SampleIndexToWarpMarker.find(sampleIndex);
+	if (itSampleIndexToWarpMarker != m_SampleIndexToWarpMarker.end())
+	{
+		return true;
+	}
+
+	return false;
+}
+
+	
+bool AClip::BeatTimeKeyAlreadyExists(double beatTime) const
+{	
+	// As for AClip::SampleIndexKeyAlreadyExists, it could be necessary to perform a less naive test to
+	// determine if a beat time keu already exists. Moreover, due to floating point arithmetics, the user 
+	// code which calls this method might use a beatTime value that is slightly different but should point to the 
+	// same warp marker.
+	std::map<double, WarpMarker*>::const_iterator itBeatTimeToWarpMarker = m_BeatTimeToWarpMarker.find(beatTime);
+	if (itBeatTimeToWarpMarker != m_BeatTimeToWarpMarker.end())
+	{
+		return true;
+	}
+
+	return false;
+}
 
 bool AClip::ValidateWarpMarkerForAdd(const WarpMarker& warpMarkerToAdd)
-{	
+{		
 	double sampleTimeToAdd = warpMarkerToAdd.GetSampleTime();
 	double beatTimeToAdd = warpMarkerToAdd.GetBeatTime();
 	
+	// Check that sample time for the warp marker to be added is within bounds of the physical signal
+	// Beat time can't be negative, as it doesn't make sense to warp "in the past", but we could want 
+	// to warp to any time in the future
 	if (sampleTimeToAdd < 0.0 || 
-		(!AlmostEqualWithTolerance(sampleTimeToAdd, GetDuration(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE) && sampleTimeToAdd > GetDuration()) || 
+		(!MathUtils::AlmostEqualWithTolerance(sampleTimeToAdd, GetDuration(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE) && sampleTimeToAdd > GetDuration()) || 
 		beatTimeToAdd < 0.0)
 	{
 		return false;
 	}
 
+	if (m_SampleIndexToWarpMarker.empty() && m_BeatTimeToWarpMarker.empty())
+	{
+		// We're about to add the first warp marker, all necessary checks are done
+		return true;
+	}
+
+	if (SampleIndexKeyAlreadyExists(warpMarkerToAdd.GetSampleIndex()))
+	{
+		return false;
+	}
+
+	if (BeatTimeKeyAlreadyExists(warpMarkerToAdd.GetBeatTime()))
+	{
+		return false;
+	}	
+
 	WarpMarker lowBoundWarpMarkerSampleTime;
 	WarpMarker highBoundWarpMarkerSampleTime;
 	if (!FindBoundingWarpMarkersForSampleTime(warpMarkerToAdd.GetSampleTime(), lowBoundWarpMarkerSampleTime, highBoundWarpMarkerSampleTime))
 	{
+		// We're adding our warp marker outside of two bouding warp markers, all necessary checks are done
 		return true;
 	}
 
@@ -61,22 +135,27 @@ bool AClip::ValidateWarpMarkerForAdd(const WarpMarker& warpMarkerToAdd)
 	WarpMarker highBoundWarpMarkerBeatTime;
 	if (!FindBoundingWarpMarkersForBeatTime(warpMarkerToAdd.GetBeatTime(), lowBoundWarpMarkerBeatTime, highBoundWarpMarkerBeatTime))
 	{
+		// We're adding our warp marker within bouding warp markers regarding sample time, but not beat time, 
+		// there's something wrong.
 		return false;
 	}
 
 	if (lowBoundWarpMarkerBeatTime != lowBoundWarpMarkerSampleTime || highBoundWarpMarkerBeatTime != highBoundWarpMarkerSampleTime)
 	{
+		// The two bounding warp markers we found when searching using beat time as search criteria are different
+		// than those we found when using sample time as search criteria, there's something wrong
 		return false;
 	}
 
-	if (AlmostEqualWithTolerance(sampleTimeToAdd, lowBoundWarpMarkerSampleTime.GetSampleTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)	||
-		AlmostEqualWithTolerance(sampleTimeToAdd, highBoundWarpMarkerSampleTime.GetSampleTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)	||
-		AlmostEqualWithTolerance(beatTimeToAdd, lowBoundWarpMarkerSampleTime.GetBeatTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)		||
-		AlmostEqualWithTolerance(beatTimeToAdd, lowBoundWarpMarkerSampleTime.GetBeatTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE))
+	if (MathUtils::AlmostEqualWithTolerance(sampleTimeToAdd, lowBoundWarpMarkerSampleTime.GetSampleTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)	||
+		MathUtils::AlmostEqualWithTolerance(sampleTimeToAdd, highBoundWarpMarkerSampleTime.GetSampleTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)	||
+		MathUtils::AlmostEqualWithTolerance(beatTimeToAdd, lowBoundWarpMarkerSampleTime.GetBeatTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)		||
+		MathUtils::AlmostEqualWithTolerance(beatTimeToAdd, lowBoundWarpMarkerSampleTime.GetBeatTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE))
 	{
+		// The warp marker we're trying to add is too similar to existing ones, so let's not add it
 		return false;
 	}
-
+	
 	return true;
 }
 
@@ -105,117 +184,187 @@ bool AClip::AddDefaultWarpMarkers()
 
 bool AClip::GetFirstWarpMarker(WarpMarker& outFirstWarpMarker) const
 {
-	if (m_WarpMarkers.empty())
+	if (m_SampleIndexToWarpMarker.empty())
 	{
 		return false;
 	}
 
-	outFirstWarpMarker = *m_WarpMarkers.begin();
-	double minSampleTime = outFirstWarpMarker.GetSampleTime();
-	
-	std::vector<WarpMarker>::const_iterator itWarpMarkers = m_WarpMarkers.begin();
-	std::vector<WarpMarker>::const_iterator itWarpMarkersEnd = m_WarpMarkers.end();
-	for (; itWarpMarkers != itWarpMarkersEnd; ++itWarpMarkers)
-	{
-		double currentWarpMarkerSampleTime = itWarpMarkers->GetSampleTime();
-		if (currentWarpMarkerSampleTime < minSampleTime)
-		{
-			minSampleTime = currentWarpMarkerSampleTime;
-			outFirstWarpMarker = *itWarpMarkers;
-		}
-	}
-
+	outFirstWarpMarker = *(m_SampleIndexToWarpMarker.begin()->second);
 	return true;
 }
 
 bool AClip::GetLastWarpMarker(WarpMarker& outLastWarpMarker) const
 {
-	if (m_WarpMarkers.empty())
+	if (m_SampleIndexToWarpMarker.empty())
 	{
 		return false;
 	}
 
-	outLastWarpMarker = *m_WarpMarkers.begin();
-	double maxSampleTime = outLastWarpMarker.GetSampleTime();
-	
-	std::vector<WarpMarker>::const_iterator itWarpMarkers = m_WarpMarkers.begin();
-	std::vector<WarpMarker>::const_iterator itWarpMarkersEnd = m_WarpMarkers.end();
-	for (; itWarpMarkers != itWarpMarkersEnd; ++itWarpMarkers)
-	{
-		double currentWarpMarkerSampleTime = itWarpMarkers->GetSampleTime();
-		if (currentWarpMarkerSampleTime > maxSampleTime)
-		{
-			maxSampleTime = currentWarpMarkerSampleTime;
-			outLastWarpMarker = *itWarpMarkers;
-		}
-	}
-
+	outLastWarpMarker = *(m_SampleIndexToWarpMarker.rbegin()->second);	
 	return true;
 }
 
 bool AClip::AddWarpMarker(double sampleTime, double beatTime)
 {
-	if (!ValidateWarpMarkerForAdd(WarpMarker(sampleTime, beatTime)))
+	if (!MathUtils::IsValidTime(sampleTime) || !MathUtils::IsValidTime(beatTime))
 	{
 		return false;
 	}
 
-	m_WarpMarkers.push_back(WarpMarker(sampleTime, beatTime)); 
+	WarpMarker* warpMarkerToAdd = new WarpMarker(sampleTime, beatTime);
+	
+	if (!ValidateWarpMarkerForAdd(*warpMarkerToAdd))
+	{
+		return false;
+	}
+		
+	m_SampleIndexToWarpMarker[warpMarkerToAdd->GetSampleIndex()] = warpMarkerToAdd; 
+	m_BeatTimeToWarpMarker[beatTime] = warpMarkerToAdd; 
+
 	m_LowAndHighBoundWarpMarkersCacheIsValid = false;
 
 	return true;
 }
 
 
-bool AClip::FindBoundingWarpMarkersForTime(double time, WarpMarker::TimeSelector timeSelector, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker) const
+bool AClip::FindBoundingWarpMarkersForSampleIndex(unsigned int sampleIndex, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker)
 {    
-    if (m_WarpMarkers.size() < 2)
+    if (m_SampleIndexToWarpMarker.size() < 2)
+    {
+        // we need at least 2 bounding warp markers in the clip to find those
+        // bounding the sample at "sampleIndex"
+        // They should have been created after loading the audio data by calling AClip::AddDefaultWarpMarkers()
+        return false;
+    }
+    
+    // First, find low bound warp marker
+	std::map<unsigned int, WarpMarker*>::iterator itJustAfterLowBoundWarpMarker = m_SampleIndexToWarpMarker.lower_bound(sampleIndex);
+	if (itJustAfterLowBoundWarpMarker == m_SampleIndexToWarpMarker.end())
+	{
+		return false;
+	}
+
+	std::map<unsigned int, WarpMarker*>::iterator itLowBoundWarpMarkerCandidate;
+	if (itJustAfterLowBoundWarpMarker == m_SampleIndexToWarpMarker.begin() ||
+		itJustAfterLowBoundWarpMarker->second && itJustAfterLowBoundWarpMarker->second->GetSampleIndex() == sampleIndex)
+	{
+		itLowBoundWarpMarkerCandidate = itJustAfterLowBoundWarpMarker;
+	}
+	else
+	{
+		itLowBoundWarpMarkerCandidate = --itJustAfterLowBoundWarpMarker;
+	}
+
+	WarpMarker* lowBoundWarpMarkerFound = itLowBoundWarpMarkerCandidate->second;
+	if (!lowBoundWarpMarkerFound)
+	{
+		return false;
+	}
+
+	unsigned int lowBoundWarpMarkerSampleIndex = lowBoundWarpMarkerFound->GetSampleIndex();
+    if (lowBoundWarpMarkerSampleIndex > sampleIndex)
+	{
+		return false;		
+	}
+
+	lowBoundMarker = *lowBoundWarpMarkerFound;
+	    
+	// Then find high boung warp marker
+	std::map<unsigned int, WarpMarker*>::const_iterator itFoundHighBoundWarpMarker = m_SampleIndexToWarpMarker.upper_bound(sampleIndex);
+	if (itFoundHighBoundWarpMarker == m_SampleIndexToWarpMarker.end())
+	{
+		return false;
+	}
+
+	WarpMarker* highBoundWarpMarkerFound = itFoundHighBoundWarpMarker->second;
+	if (!highBoundWarpMarkerFound)
+	{
+		return false;
+	}
+
+	unsigned int highBoundWarpMarkerSampleIndex = highBoundWarpMarkerFound->GetSampleIndex();
+	if (highBoundWarpMarkerSampleIndex <= sampleIndex)
+	{
+		return false;
+	}	
+    
+	highBoundMarker = *highBoundWarpMarkerFound;
+
+	return true;
+}
+
+bool AClip::FindBoundingWarpMarkersForSampleTime(double sampleTime, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker)
+{
+	unsigned int sampleIndex = MathUtils::Round(sampleTime * DEFAULT_SAMPLE_RATE);
+	return FindBoundingWarpMarkersForSampleIndex(sampleIndex, lowBoundMarker, highBoundMarker);
+}
+
+bool AClip::FindBoundingWarpMarkersForBeatTime(double beatTime, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker)
+{
+	if (m_BeatTimeToWarpMarker.size() < 2)
     {
         // we need at least 2 bounding warp markers in the clip to find those
         // bounding the beat time at "beatTime"
         // They should have been created after loading the audio data by calling AClip::AddDefaultWarpMarkers()
         return false;
     }
-
-    if (!GetFirstWarpMarker(lowBoundMarker))
-	{
-		return false;
-	}
-
-    if (!GetLastWarpMarker(highBoundMarker))
-	{
-		return false;
-	}
-
-    std::vector<WarpMarker>::const_iterator itWarpMarkers = m_WarpMarkers.begin();
-    std::vector<WarpMarker>::const_iterator itWarpMarkersEnd = m_WarpMarkers.end();
-    for (; itWarpMarkers != itWarpMarkersEnd; ++itWarpMarkers)
-    {
-        double currentWarpMarkerTime = timeSelector(*itWarpMarkers);
-        if ((currentWarpMarkerTime < time || AlmostEqualWithTolerance(currentWarpMarkerTime, time, TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)) &&
-			currentWarpMarkerTime > timeSelector(lowBoundMarker))
-        {
-            lowBoundMarker = *itWarpMarkers;
-			continue;
-        }
-
-        if (currentWarpMarkerTime > time && currentWarpMarkerTime < timeSelector(highBoundMarker))
-        {
-            highBoundMarker = *itWarpMarkers;
-        }
-    }	
     
-	return true;
-}
+    // First, find low bound warp marker
+	std::map<double, WarpMarker*>::iterator itJustAfterLowBoundWarpMarkerCandidate = m_BeatTimeToWarpMarker.lower_bound(beatTime);
+	if (itJustAfterLowBoundWarpMarkerCandidate == m_BeatTimeToWarpMarker.end())
+	{
+		return false;
+	}
 
-bool AClip::FindBoundingWarpMarkersForSampleTime(double sampleTime, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker) const
-{
-	return FindBoundingWarpMarkersForTime(sampleTime, WarpMarker::SampleTimeSelector, lowBoundMarker, highBoundMarker);
-}
+	std::map<double, WarpMarker*>::iterator itLowBoundWarpMarker;
+	std::map<double, WarpMarker*>::iterator lowestBound = m_BeatTimeToWarpMarker.begin();
 
-bool AClip::FindBoundingWarpMarkersForBeatTime(double beatTime, WarpMarker& lowBoundMarker, WarpMarker& highBoundMarker) const
-{
-	return FindBoundingWarpMarkersForTime(beatTime, WarpMarker::BeatTimeSelector, lowBoundMarker, highBoundMarker);
+	if (itJustAfterLowBoundWarpMarkerCandidate == lowestBound ||
+		itJustAfterLowBoundWarpMarkerCandidate->second && MathUtils::AlmostEqualWithTolerance(itJustAfterLowBoundWarpMarkerCandidate->second->GetBeatTime(), beatTime, TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE))
+	{
+		itLowBoundWarpMarker = itJustAfterLowBoundWarpMarkerCandidate;
+	}
+	else
+	{
+		itLowBoundWarpMarker = --itJustAfterLowBoundWarpMarkerCandidate;
+	}	
+
+	WarpMarker* lowBoundWarpMarkerFound = itLowBoundWarpMarker->second;
+	if (!lowBoundWarpMarkerFound)
+	{
+		return false;
+	}
+
+	double lowBoundWarpMarkerBeatTime = lowBoundWarpMarkerFound->GetBeatTime();
+	if (lowBoundWarpMarkerBeatTime > beatTime && !MathUtils::AlmostEqualWithTolerance(lowBoundWarpMarkerBeatTime, beatTime, TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE))
+	{
+		return false;		
+	}
+
+	lowBoundMarker = *lowBoundWarpMarkerFound;
+	    
+	// Then find high boung warp marker
+	std::map<double, WarpMarker*>::iterator itFoundHighBoundWarpMarker = m_BeatTimeToWarpMarker.upper_bound(beatTime);
+	if (itFoundHighBoundWarpMarker == m_BeatTimeToWarpMarker.end())
+	{
+		return false;
+	}
+	
+	WarpMarker* highBoundWarpMarkerFound = itFoundHighBoundWarpMarker->second;
+	if (!highBoundWarpMarkerFound)
+	{
+		return false;
+	}
+
+	double highBoundWarpMarkerBeatTime = highBoundWarpMarkerFound->GetBeatTime();
+	if (highBoundWarpMarkerBeatTime < beatTime || MathUtils::AlmostEqualWithTolerance(highBoundWarpMarkerBeatTime, beatTime, TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE))
+	{
+		return false;
+	}	
+    
+	highBoundMarker = *highBoundWarpMarkerFound;
+
+	return true;	
 }
 
 //----------------------------------------------------------------------------------------
@@ -227,7 +376,7 @@ double AClip::BeatToSampleTime(double BeatTime)
 
 	if (m_LowAndHighBoundWarpMarkersCacheIsValid)
 	{
-		if ((BeatTime > m_CurrentCachedLowBoundWarpMarker.GetBeatTime() || AlmostEqualWithTolerance(BeatTime, m_CurrentCachedLowBoundWarpMarker.GetBeatTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)) &&
+		if ((BeatTime > m_CurrentCachedLowBoundWarpMarker.GetBeatTime() || MathUtils::AlmostEqualWithTolerance(BeatTime, m_CurrentCachedLowBoundWarpMarker.GetBeatTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)) &&
 			BeatTime < m_CurrentCachedHighBoundWarpMarker.GetBeatTime())
 		{
 			lowBoundMarker = m_CurrentCachedLowBoundWarpMarker;
@@ -247,9 +396,9 @@ double AClip::BeatToSampleTime(double BeatTime)
 		m_CurrentCachedHighBoundWarpMarker = highBoundMarker;
 		m_LowAndHighBoundWarpMarkersCacheIsValid = true;
 
-		double linearMappedSampleTime = LinearMap(	BeatTime, 
-													lowBoundMarker.GetBeatTime(), highBoundMarker.GetBeatTime(), 
-													lowBoundMarker.GetSampleTime(), highBoundMarker.GetSampleTime());
+		double linearMappedSampleTime = MathUtils::LinearMap(	BeatTime, 
+																lowBoundMarker.GetBeatTime(), highBoundMarker.GetBeatTime(), 
+																lowBoundMarker.GetSampleTime(), highBoundMarker.GetSampleTime());
         return linearMappedSampleTime;
     }
 
@@ -266,7 +415,7 @@ double AClip::SampleToBeatTime(double SampleTime)
 
 	if (m_LowAndHighBoundWarpMarkersCacheIsValid)
 	{
-		if ((SampleTime > m_CurrentCachedLowBoundWarpMarker.GetSampleTime() || AlmostEqualWithTolerance(SampleTime, m_CurrentCachedLowBoundWarpMarker.GetSampleTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)) &&
+		if ((SampleTime > m_CurrentCachedLowBoundWarpMarker.GetSampleTime() || MathUtils::AlmostEqualWithTolerance(SampleTime, m_CurrentCachedLowBoundWarpMarker.GetSampleTime(), TIME_RELATIVE_TOLERANCE, TIME_ABSOLUTE_TOLERANCE)) &&
 			SampleTime < m_CurrentCachedHighBoundWarpMarker.GetSampleTime())
 		{
 			lowBoundMarker = m_CurrentCachedLowBoundWarpMarker;
@@ -286,9 +435,9 @@ double AClip::SampleToBeatTime(double SampleTime)
 		m_CurrentCachedHighBoundWarpMarker = highBoundMarker;
 		m_LowAndHighBoundWarpMarkersCacheIsValid = true;
 
-		double linearMappedBeatTime = LinearMap(SampleTime, 
-			lowBoundMarker.GetSampleTime(), highBoundMarker.GetSampleTime(), 
-			lowBoundMarker.GetBeatTime(), highBoundMarker.GetBeatTime());
+		double linearMappedBeatTime = MathUtils::LinearMap(	SampleTime, 
+															lowBoundMarker.GetSampleTime(), highBoundMarker.GetSampleTime(), 
+															lowBoundMarker.GetBeatTime(), highBoundMarker.GetBeatTime());
 		return linearMappedBeatTime;
 	}
 
@@ -372,6 +521,8 @@ bool AClip::LoadDataFromFile(const std::string& filePath)
 		samplesLeftToRead -= samplesRead;		
 	}
     
+	m_Peaks = foundPeaks;
+
 	wavInputStream.close();	
 
 	if (samplesLeftToRead == 0)
