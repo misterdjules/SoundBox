@@ -14,12 +14,12 @@ public:
 		}
 
 		// Then check regarding relative error
-		_FloatingPointType relativeError;
-		if (fabs(A) > fabs(B))
+		_FloatingPointType relativeError = std::numeric_limits<_FloatingPointType>::max();
+		if (fabs(A) > fabs(B) && A != 0.f)
 		{
 			relativeError = fabs((A - B) / A);
 		}
-		else
+		else if (B != 0.f)
 		{
 			relativeError = fabs((A - B) / B);
 		}
